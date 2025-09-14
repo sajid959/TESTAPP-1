@@ -265,12 +265,12 @@ export const mastra = new Mastra({
               
               // Execute scraping tool
               const scrapingResult = await webScrapingTool.execute({
-                context: { searchQuery: query, sites, maxResults: 50 },
+                context: { query: query, sites: sites, minDiscountPercentage: 50 },
                 mastra
               });
               
-              if (!scrapingResult.success) {
-                throw new Error(scrapingResult.error || "Scraping failed");
+              if (!scrapingResult || !scrapingResult.deals) {
+                throw new Error("Scraping failed - no deals returned");
               }
               
               // Filter deals with AI
