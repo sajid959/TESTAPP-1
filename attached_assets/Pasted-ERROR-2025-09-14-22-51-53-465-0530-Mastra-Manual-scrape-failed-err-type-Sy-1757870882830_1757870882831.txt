@@ -1,0 +1,34 @@
+ERROR [2025-09-14 22:51:53.465 +0530] (Mastra): Manual scrape failed:
+    err: {
+      "type": "SyntaxError",
+      "message": "Unexpected token 'q', \"query=elec\"... is not valid JSON",
+      "stack":
+          SyntaxError: Unexpected token 'q', "query=elec"... is not valid JSON
+              at JSON.parse (<anonymous>)
+              at file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:2498:57
+              at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+              at async file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:1639:28
+              at async dispatch (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:2132:17)
+              at async Mastra.server.middleware (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:1475:9)
+              at async dispatch (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:2132:17)
+              at async dispatch (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:2132:17)
+              at async dispatch (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:2132:17)
+              at async cors2 (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:3641:5)
+    }
+ERROR [2025-09-14 22:52:00.497 +0530] (Mastra): Manual scrape failed:
+    err: {
+      "type": "SyntaxError",
+      "message": "Unexpected token 'q', \"query=elec\"... is not valid JSON",
+      "stack":
+          SyntaxError: Unexpected token 'q', "query=elec"... is not valid JSON
+              at JSON.parse (<anonymous>)
+              at file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:2498:57
+              at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+              at async file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:1639:28
+              at async dispatch (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:2132:17)
+              at async Mastra.server.middleware (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:1475:9)
+              at async dispatch (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:2132:17)
+              at async dispatch (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:2132:17)
+              at async dispatch (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:2132:17)
+              at async cors2 (file:///C:/Users/lucky/OneDrive/Documents/WebApp/TESTAPP-1/.mastra/output/index.mjs:3641:5)
+    }
