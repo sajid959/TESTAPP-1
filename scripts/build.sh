@@ -2,4 +2,4 @@
 
 set -e
 
-exec mastra build
+exec npx mastra build
