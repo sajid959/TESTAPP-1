@@ -234,7 +234,31 @@ export const mastra = new Mastra({
           
           return async (c) => {
             try {
-              const body = await c.req.json();
+              // Handle both JSON and form data
+              let body: any;
+              const contentType = c.req.header('content-type') || '';
+              
+              if (contentType.includes('application/json')) {
+                body = await c.req.json();
+              } else {
+                // Handle form data or URL-encoded data
+                const formData = await c.req.parseBody();
+                body = {};
+                
+                // Parse HTMX vals if they exist
+                if (formData.query) {
+                  body.query = formData.query;
+                }
+                if (formData.sites) {
+                  // Parse sites array if it's a JSON string
+                  try {
+                    body.sites = JSON.parse(formData.sites as string);
+                  } catch {
+                    body.sites = [formData.sites];
+                  }
+                }
+              }
+              
               const { query = "electronics", sites = ["Amazon", "eBay", "Walmart", "Best Buy", "Target"] } = body;
               
               mastra?.getLogger()?.info("Starting manual scrape:", { query, sites });
@@ -327,6 +351,7 @@ export const mastra = new Mastra({
                 class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 rounded-lg transition-colors"
                 hx-post="/api/scrape" 
                 hx-vals='{"query": "electronics", "sites": ["Amazon", "eBay", "Walmart", "Best Buy", "Target"]}'
+                hx-headers='{"Content-Type": "application/json"}'
                 hx-target="#scrape-results"
                 hx-indicator="#loading"
             >
