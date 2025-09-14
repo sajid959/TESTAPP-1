@@ -6,7 +6,7 @@ integrations = ["agentstack-trigger-time_based:1.0.0"]
 
 [nix]
 channel = "stable-24_11"
-packages = ["jq"]
+packages = ["jq", "glib", "gtk3", "xvfb-run", "chromium"]
 
 [deployment]
 build = ["bash", "scripts/build.sh"]
