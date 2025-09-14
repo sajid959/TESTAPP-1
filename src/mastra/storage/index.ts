@@ -1,8 +1,8 @@
 import mongoose from "mongoose";
 import { z } from "zod";
 
-// MongoDB connection setup
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/mastra-deals";
+// MongoDB connection setup - use MongoDB Atlas free tier
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://demo:demo123@cluster0.mongodb.net/mastra-deals?retryWrites=true&w=majority";
 
 // Initialize MongoDB connection
 let isConnected = false;
@@ -11,12 +11,18 @@ export async function connectToMongoDB() {
   if (isConnected) return;
 
   try {
-    await mongoose.connect(MONGODB_URI);
-    isConnected = true;
-    console.log("✅ Connected to MongoDB");
+    // Only attempt MongoDB connection if a custom URI is provided
+    if (process.env.MONGODB_URI && process.env.MONGODB_URI.includes('mongodb')) {
+      await mongoose.connect(MONGODB_URI);
+      isConnected = true;
+      console.log("✅ Connected to MongoDB Atlas");
+    } else {
+      console.log("⚠️ MongoDB URI not configured, using in-memory storage for deals");
+      // Don't throw error, just use in-memory storage
+    }
   } catch (error) {
-    console.error("❌ MongoDB connection failed:", error);
-    throw error;
+    console.warn("⚠️ MongoDB connection failed, falling back to in-memory storage:", error.message);
+    // Don't throw error, fall back to in-memory storage
   }
 }
 
@@ -98,6 +104,27 @@ class SimpleMemoryStorage {
     return Promise.resolve();
   }
 
+  // Additional required methods for Mastra telemetry
+  async batchTraceInsert(traces: any[]) {
+    // No-op for memory storage
+    return Promise.resolve();
+  }
+
+  async getTraces(filters: any) {
+    // No-op for memory storage
+    return Promise.resolve([]);
+  }
+
+  async getTrace(id: string) {
+    // No-op for memory storage
+    return Promise.resolve(null);
+  }
+
+  async deleteTrace(id: string) {
+    // No-op for memory storage
+    return Promise.resolve();
+  }
+
   async clear() {
     this.data.clear();
     return;
@@ -120,6 +147,8 @@ export const sharedPostgresStorage = new SimpleMemoryStorage();
 
 // Deal storage service
 export class DealStorage {
+  private memoryDeals: any[] = [];
+  
   constructor() {
     connectToMongoDB();
   }
@@ -128,12 +157,31 @@ export class DealStorage {
     const hash = this.generateDealHash(dealData);
     
     try {
-      const deal = await Deal.findOneAndUpdate(
-        { hash },
-        { ...dealData, hash },
-        { upsert: true, new: true }
-      );
-      return deal;
+      if (isConnected) {
+        const deal = await Deal.findOneAndUpdate(
+          { hash },
+          { ...dealData, hash },
+          { upsert: true, new: true }
+        );
+        return deal;
+      } else {
+        // Fallback to memory storage
+        const existingIndex = this.memoryDeals.findIndex(d => d.hash === hash);
+        const dealWithHash = { ...dealData, hash, _id: hash, createdAt: new Date(), updatedAt: new Date() };
+        
+        if (existingIndex >= 0) {
+          this.memoryDeals[existingIndex] = dealWithHash;
+        } else {
+          this.memoryDeals.push(dealWithHash);
+        }
+        
+        // Keep only last 1000 deals in memory
+        if (this.memoryDeals.length > 1000) {
+          this.memoryDeals = this.memoryDeals.slice(-1000);
+        }
+        
+        return dealWithHash;
+      }
     } catch (error) {
       console.error('Error saving deal:', error);
       throw error;
@@ -142,11 +190,35 @@ export class DealStorage {
 
   async getDeals(filters: any = {}, limit: number = 50, sort: any = { createdAt: -1 }) {
     try {
-      const deals = await Deal.find(filters)
-        .sort(sort)
-        .limit(limit)
-        .lean();
-      return deals;
+      if (isConnected) {
+        const deals = await Deal.find(filters)
+          .sort(sort)
+          .limit(limit)
+          .lean();
+        return deals;
+      } else {
+        // Fallback to memory storage
+        let filteredDeals = [...this.memoryDeals];
+        
+        // Apply filters
+        if (filters.discountPercentage && filters.discountPercentage.$gte) {
+          filteredDeals = filteredDeals.filter(d => d.discountPercentage >= filters.discountPercentage.$gte);
+        }
+        if (filters.site) {
+          filteredDeals = filteredDeals.filter(d => d.site === filters.site);
+        }
+        
+        // Apply sort
+        const sortKey = Object.keys(sort)[0] || 'createdAt';
+        const sortOrder = sort[sortKey] || -1;
+        filteredDeals.sort((a, b) => {
+          const aVal = a[sortKey];
+          const bVal = b[sortKey];
+          return sortOrder === 1 ? (aVal > bVal ? 1 : -1) : (aVal < bVal ? 1 : -1);
+        });
+        
+        return filteredDeals.slice(0, limit);
+      }
     } catch (error) {
       console.error('Error fetching deals:', error);
       throw error;
@@ -155,14 +227,22 @@ export class DealStorage {
 
   async getTopDeals(minDiscount: number = 50, limit: number = 25) {
     try {
-      const deals = await Deal.find({
-        discountPercentage: { $gte: minDiscount },
-        confidenceScore: { $gte: 60 }
-      })
-      .sort({ discountPercentage: -1, confidenceScore: -1 })
-      .limit(limit)
-      .lean();
-      return deals;
+      if (isConnected) {
+        const deals = await Deal.find({
+          discountPercentage: { $gte: minDiscount },
+          confidenceScore: { $gte: 60 }
+        })
+        .sort({ discountPercentage: -1, confidenceScore: -1 })
+        .limit(limit)
+        .lean();
+        return deals;
+      } else {
+        // Fallback to memory storage
+        return this.memoryDeals
+          .filter(d => d.discountPercentage >= minDiscount && (d.confidenceScore || 0) >= 60)
+          .sort((a, b) => (b.discountPercentage - a.discountPercentage) || ((b.confidenceScore || 0) - (a.confidenceScore || 0)))
+          .slice(0, limit);
+      }
     } catch (error) {
       console.error('Error fetching top deals:', error);
       throw error;
@@ -171,13 +251,21 @@ export class DealStorage {
 
   async getPricingGlitches(minProbability: number = 70, limit: number = 25) {
     try {
-      const deals = await Deal.find({
-        pricingGlitchProbability: { $gte: minProbability }
-      })
-      .sort({ pricingGlitchProbability: -1, confidenceScore: -1 })
-      .limit(limit)
-      .lean();
-      return deals;
+      if (isConnected) {
+        const deals = await Deal.find({
+          pricingGlitchProbability: { $gte: minProbability }
+        })
+        .sort({ pricingGlitchProbability: -1, confidenceScore: -1 })
+        .limit(limit)
+        .lean();
+        return deals;
+      } else {
+        // Fallback to memory storage
+        return this.memoryDeals
+          .filter(d => (d.pricingGlitchProbability || 0) >= minProbability)
+          .sort((a, b) => ((b.pricingGlitchProbability || 0) - (a.pricingGlitchProbability || 0)) || ((b.confidenceScore || 0) - (a.confidenceScore || 0)))
+          .slice(0, limit);
+      }
     } catch (error) {
       console.error('Error fetching pricing glitches:', error);
       throw error;
