@@ -1,11 +1,12 @@
-modules = ["nodejs-22"]
+modules = ["nodejs-20", "bash"]
 
 [agent]
 stack = "AGENT_STACK"
 integrations = ["agentstack-trigger-time_based:1.0.0"]
+expertMode = true
 
 [nix]
-channel = "stable-24_11"
+channel = "stable-25_05"
 packages = ["jq", "glib", "gtk3", "xvfb-run", "chromium"]
 
 [deployment]
