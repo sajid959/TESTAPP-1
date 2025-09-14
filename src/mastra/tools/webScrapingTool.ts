@@ -25,23 +25,31 @@ const DealSchema = z.object({
 
 type Deal = z.infer<typeof DealSchema>;
 
-// Premium proxy configuration - use environment variables for production
-// Free proxies are unreliable and unsafe for production use
+// Premium proxy configuration - REQUIRED for production
 const getProxyList = (): string[] => {
-  // Use premium proxy service if configured
+  // Use premium proxy service - REQUIRED for production anti-ban
   if (process.env.PROXY_SERVICE_URL) {
-    return [process.env.PROXY_SERVICE_URL];
+    const proxies = process.env.PROXY_SERVICE_URL.split(',').map(p => p.trim());
+    console.log(`📡 Using ${proxies.length} configured proxy endpoints`);
+    return proxies;
   }
   
-  // Fallback to rotating free proxies (not recommended for production)
-  return [
-    'http://proxy.toolip.io:31337',
-    'http://proxy-server.scraperapi.com:8001',
-    'http://gateway.scraperapi.com:8001'
-  ];
+  console.warn('⚠️ No PROXY_SERVICE_URL configured - using direct connection (NOT recommended for production)');
+  return [];
 };
 
 const PROXY_LIST = getProxyList();
+
+// Enhanced rate limiting per site
+const SITE_RATE_LIMITS = new Map<string, { lastRequest: number; requestCount: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const MAX_REQUESTS_PER_MINUTE = {
+  'Amazon': 2,
+  'eBay': 5,
+  'Walmart': 3,
+  'Best Buy': 4,
+  'Target': 3
+};
 
 // Proxy health status cache
 const PROXY_HEALTH: Map<string, { working: boolean; lastChecked: number }> = new Map();
@@ -276,10 +284,42 @@ const SITE_CONFIGS: SiteConfig[] = [
 class WebScrapingService {
   private browser: Browser | null = null;
   private proxyIndex = 0;
+  private browserPool: Browser[] = [];
+  private maxConcurrentPages = 3;
+  private currentPages = 0;
   private logger?: IMastraLogger;
 
   constructor(logger?: IMastraLogger) {
     this.logger = logger;
+  }
+
+  private async enforceRateLimit(siteName: string): Promise<void> {
+    const limit = MAX_REQUESTS_PER_MINUTE[siteName] || 5;
+    const now = Date.now();
+    const siteData = SITE_RATE_LIMITS.get(siteName) || { lastRequest: 0, requestCount: 0, resetTime: now + RATE_LIMIT_WINDOW };
+    
+    // Reset counter if window expired
+    if (now > siteData.resetTime) {
+      siteData.requestCount = 0;
+      siteData.resetTime = now + RATE_LIMIT_WINDOW;
+    }
+    
+    // Enforce rate limit
+    if (siteData.requestCount >= limit) {
+      const waitTime = siteData.resetTime - now;
+      this.logger?.info(`🕐 Rate limiting ${siteName}: waiting ${Math.round(waitTime/1000)}s`);
+      await this.sleep(waitTime);
+      siteData.requestCount = 0;
+      siteData.resetTime = now + RATE_LIMIT_WINDOW;
+    }
+    
+    siteData.requestCount++;
+    siteData.lastRequest = now;
+    SITE_RATE_LIMITS.set(siteName, siteData);
+    
+    // Add random delay between 1-3 seconds
+    const randomDelay = 1000 + Math.random() * 2000;
+    await this.sleep(randomDelay);
   }
 
   private async checkProxyHealth(proxy: string): Promise<boolean> {

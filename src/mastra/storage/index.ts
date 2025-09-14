@@ -1,8 +1,12 @@
 import mongoose from "mongoose";
 import { z } from "zod";
 
-// MongoDB connection setup - use MongoDB Atlas free tier
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://demo:demo123@cluster0.mongodb.net/mastra-deals?retryWrites=true&w=majority";
+// MongoDB connection setup - MUST be provided via environment variable
+const MONGODB_URI = process.env.MONGODB_URI;
+
+if (!MONGODB_URI && process.env.NODE_ENV === 'production') {
+  throw new Error('MONGODB_URI environment variable is required in production');
+}
 
 // Initialize MongoDB connection
 let isConnected = false;

@@ -126,10 +126,13 @@ export const mastra = new Mastra({
           return async (c) => {
             try {
               const query = c.req.query();
-              const limit = parseInt(query.limit || "25");
-              const minDiscount = parseInt(query.minDiscount || "50");
+              const limit = Math.min(parseInt(query.limit || "25"), 100); // Cap at 100
+              const minDiscount = Math.max(0, parseInt(query.minDiscount || "50"));
               const site = query.site;
-              const sort = query.sort || "createdAt";
+              
+              // Whitelist allowed sort fields for security
+              const allowedSorts = ['createdAt', 'discountPercentage', 'confidenceScore', 'pricingGlitchProbability'];
+              const sort = allowedSorts.includes(query.sort) ? query.sort : "createdAt";
               const order = query.order === "asc" ? 1 : -1;
 
               const filters: any = {
