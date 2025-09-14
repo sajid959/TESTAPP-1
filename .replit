@@ -2,7 +2,7 @@ modules = ["nodejs-20", "bash"]
 
 [agent]
 stack = "AGENT_STACK"
-integrations = ["agentstack-trigger-time_based:1.0.0"]
+integrations = ["agentstack-trigger-time_based:1.0.0", "perplexity_v0:1.0.0", "javascript_openai:1.0.0"]
 expertMode = true
 
 [nix]
@@ -25,6 +25,10 @@ externalPort = 80
 
 [[ports]]
 localPort = 8289
+
+[[ports]]
+localPort = 44855
+externalPort = 3001
 
 [[ports]]
 localPort = 50052
