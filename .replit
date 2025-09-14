@@ -11,8 +11,8 @@ packages = ["jq", "glib", "gtk3", "xvfb-run", "chromium"]
 
 [deployment]
 build = ["bash", "scripts/build.sh"]
-run = ["sh", "-c", "cd .mastra/output && NODE_ENV=production node index.mjs"]
-deploymentTarget = "cloudrun"
+run = ["npm", "run", "dev"]
+deploymentTarget = "autoscale"
 
 [[ports]]
 localPort = 3000
@@ -32,9 +32,11 @@ externalPort = 3002
 
 [[ports]]
 localPort = 50052
+externalPort = 3003
 
 [[ports]]
 localPort = 50053
+externalPort = 3001
 
 [workflows]
 runButton = "Project"
