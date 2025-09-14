@@ -3,8 +3,14 @@ import type { IMastraLogger } from "@mastra/core/logger";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
 import { z } from "zod";
+import axios from "axios";
 
-// OpenAI client setup
+// AI client setup - Perplexity first, OpenAI fallback
+const perplexity = createOpenAI({
+  baseURL: "https://api.perplexity.ai",
+  apiKey: process.env.PERPLEXITY_API_KEY,
+});
+
 const openai = createOpenAI({
   baseURL: process.env.OPENAI_BASE_URL || undefined,
   apiKey: process.env.OPENAI_API_KEY,
@@ -198,77 +204,94 @@ class DealFilteringService {
       discount: deal.discountPercentage
     });
 
-    try {
-      const prompt = AI_ANALYSIS_PROMPT
-        .replace('{title}', deal.title)
-        .replace('{site}', deal.site)
-        .replace('{originalPrice}', deal.originalPrice?.toString() || 'N/A')
-        .replace('{currentPrice}', deal.currentPrice.toString())
-        .replace('{discountPercentage}', deal.discountPercentage.toString())
-        .replace('{availability}', deal.availability);
+    const prompt = AI_ANALYSIS_PROMPT
+      .replace('{title}', deal.title)
+      .replace('{site}', deal.site)
+      .replace('{originalPrice}', deal.originalPrice?.toString() || 'N/A')
+      .replace('{currentPrice}', deal.currentPrice.toString())
+      .replace('{discountPercentage}', deal.discountPercentage.toString())
+      .replace('{availability}', deal.availability);
 
+    // Try Perplexity first
+    try {
+      this.logger?.info('🔍 [DealFilteringService] Trying Perplexity API first...');
+      
       const { text } = await generateText({
-        model: openai("gpt-4o-mini"),
+        model: perplexity("llama-3.1-sonar-small-128k-online"),
         messages: [
           {
             role: "user",
             content: prompt + "\n\nRespond with valid JSON only, no additional text.",
           },
         ],
-        temperature: 0.3, // Lower temperature for more consistent analysis
+        temperature: 0.2,
       });
 
-      // Parse the JSON response
-      let parsedResponse: PricingAnalysisResult;
+      return await this.parseAIResponse(text, 'Perplexity');
+
+    } catch (perplexityError) {
+      this.logger?.warn('⚠️ [DealFilteringService] Perplexity failed, trying OpenAI fallback:', {
+        error: perplexityError instanceof Error ? perplexityError.message : perplexityError
+      });
+
       try {
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        const jsonStr = jsonMatch ? jsonMatch[0] : text;
-        parsedResponse = JSON.parse(jsonStr);
-      } catch (parseError) {
-        this.logger?.warn('⚠️ [DealFilteringService] Failed to parse AI response, using fallback:', {
-          error: parseError instanceof Error ? parseError.message : parseError,
-          response: text.substring(0, 200)
+        const { text } = await generateText({
+          model: openai("gpt-5"), // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+          messages: [
+            {
+              role: "user",
+              content: prompt + "\n\nRespond with valid JSON only, no additional text.",
+            },
+          ],
+          temperature: 0.3,
         });
-        throw new Error('Failed to parse AI analysis response');
+
+        return await this.parseAIResponse(text, 'OpenAI');
+
+      } catch (openaiError) {
+        this.logger?.error('❌ [DealFilteringService] Both AI services failed:', {
+          perplexityError: perplexityError instanceof Error ? perplexityError.message : perplexityError,
+          openaiError: openaiError instanceof Error ? openaiError.message : openaiError
+        });
+        throw openaiError;
       }
+    }
+  }
 
-      // Validate the parsed response
+  private async parseAIResponse(text: string, provider: string): Promise<PricingAnalysisResult> {
+    this.logger?.info(`✅ [DealFilteringService] Got response from ${provider}`);
+
+    try {
+
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const jsonStr = jsonMatch ? jsonMatch[0] : text;
+      const parsedResponse = JSON.parse(jsonStr);
+
+      // Validate and sanitize the parsed response
       const response = {
-        object: {
-          isLegitimate: Boolean(parsedResponse.isLegitimate),
-          confidenceScore: Math.max(0, Math.min(100, Number(parsedResponse.confidenceScore) || 50)),
-          pricingGlitchProbability: Math.max(0, Math.min(100, Number(parsedResponse.pricingGlitchProbability) || 0)),
-          analysis: String(parsedResponse.analysis || 'No analysis provided'),
-          suspiciousFactors: Array.isArray(parsedResponse.suspiciousFactors) ? parsedResponse.suspiciousFactors : [],
-          recommendation: ["HIGH", "MEDIUM", "LOW"].includes(parsedResponse.recommendation) ? parsedResponse.recommendation : "MEDIUM"
-        }
+        isLegitimate: Boolean(parsedResponse.isLegitimate),
+        confidenceScore: Math.max(0, Math.min(100, Number(parsedResponse.confidenceScore) || 50)),
+        pricingGlitchProbability: Math.max(0, Math.min(100, Number(parsedResponse.pricingGlitchProbability) || 0)),
+        analysis: String(parsedResponse.analysis || 'No analysis provided'),
+        suspiciousFactors: Array.isArray(parsedResponse.suspiciousFactors) ? parsedResponse.suspiciousFactors : [],
+        recommendation: ["HIGH", "MEDIUM", "LOW"].includes(parsedResponse.recommendation) ? parsedResponse.recommendation : "MEDIUM"
       };
 
-      this.logger?.info('✅ [DealFilteringService] AI analysis completed:', {
-        isLegitimate: response.object.isLegitimate,
-        confidenceScore: response.object.confidenceScore,
-        pricingGlitchProbability: response.object.pricingGlitchProbability,
-        recommendation: response.object.recommendation
+      this.logger?.info(`✅ [DealFilteringService] ${provider} analysis completed:`, {
+        isLegitimate: response.isLegitimate,
+        confidenceScore: response.confidenceScore,
+        pricingGlitchProbability: response.pricingGlitchProbability,
+        recommendation: response.recommendation
       });
 
-      return response.object;
+      return response;
 
-    } catch (error) {
-      this.logger?.error('❌ [DealFilteringService] AI analysis failed:', {
-        error: error instanceof Error ? error.message : error,
-        title: deal.title
+    } catch (parseError) {
+      this.logger?.warn(`⚠️ [DealFilteringService] Failed to parse ${provider} response:`, {
+        error: parseError instanceof Error ? parseError.message : parseError,
+        response: text.substring(0, 200)
       });
-
-      // Fallback analysis if AI fails
-      const fallbackSuspiciousFactors = this.detectSuspiciousPricing(deal);
-      return {
-        isLegitimate: deal.discountPercentage >= 50 && fallbackSuspiciousFactors.length < 3,
-        confidenceScore: Math.max(10, 60 - (fallbackSuspiciousFactors.length * 15)),
-        pricingGlitchProbability: Math.min(90, fallbackSuspiciousFactors.length * 20),
-        analysis: "AI analysis failed - using fallback heuristics",
-        suspiciousFactors: fallbackSuspiciousFactors,
-        recommendation: fallbackSuspiciousFactors.length > 2 ? "LOW" : "MEDIUM"
-      };
+      throw new Error(`Failed to parse ${provider} analysis response`);
     }
   }
 
@@ -481,10 +504,18 @@ export const dealFilteringTool = createTool({
       maxResults
     });
 
-    if (!process.env.OPENAI_API_KEY) {
-      const error = 'OpenAI API key not configured - required for deal analysis';
+    if (!process.env.PERPLEXITY_API_KEY && !process.env.OPENAI_API_KEY) {
+      const error = 'Neither Perplexity nor OpenAI API keys configured - at least one is required for deal analysis';
       logger?.error('❌ [DealFilteringTool] Configuration error:', { error });
       throw new Error(error);
+    }
+
+    if (!process.env.PERPLEXITY_API_KEY) {
+      logger?.warn('⚠️ [DealFilteringTool] Perplexity API key not configured - will use OpenAI only');
+    }
+    
+    if (!process.env.OPENAI_API_KEY) {
+      logger?.warn('⚠️ [DealFilteringTool] OpenAI API key not configured - will use Perplexity only');
     }
 
     const filteringService = new DealFilteringService(logger);

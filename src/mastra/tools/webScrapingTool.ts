@@ -25,19 +25,23 @@ const DealSchema = z.object({
 
 type Deal = z.infer<typeof DealSchema>;
 
-// Working free proxy list with health checks
-const FREE_PROXIES: string[] = [
-  'http://51.79.50.22:9300',
-  'http://47.74.152.29:8888',
-  'http://20.111.54.16:8123',
-  'http://47.88.11.3:8080',
-  'http://8.213.128.90:8080',
-  'http://47.91.104.193:3128',
-  'http://198.49.68.80:8080',
-  'http://47.91.124.153:8080',
-  'http://103.127.1.130:80',
-  'http://185.82.99.135:9091'
-];
+// Premium proxy configuration - use environment variables for production
+// Free proxies are unreliable and unsafe for production use
+const getProxyList = (): string[] => {
+  // Use premium proxy service if configured
+  if (process.env.PROXY_SERVICE_URL) {
+    return [process.env.PROXY_SERVICE_URL];
+  }
+  
+  // Fallback to rotating free proxies (not recommended for production)
+  return [
+    'http://proxy.toolip.io:31337',
+    'http://proxy-server.scraperapi.com:8001',
+    'http://gateway.scraperapi.com:8001'
+  ];
+};
+
+const PROXY_LIST = getProxyList();
 
 // Proxy health status cache
 const PROXY_HEALTH: Map<string, { working: boolean; lastChecked: number }> = new Map();
@@ -226,6 +230,47 @@ const SITE_CONFIGS: SiteConfig[] = [
       return null;
     },
   },
+  {
+    name: "Target",
+    baseUrl: "https://www.target.com",
+    searchUrl: (query) => `https://www.target.com/s?searchTerm=${encodeURIComponent(query)}`,
+    requiresJS: true,
+    selectors: {
+      productContainer: '[data-test="product-item"]',
+      title: '[data-test="product-title"]',
+      originalPrice: '[data-test="product-price-reg"]',
+      currentPrice: '[data-test="product-price"]',
+      image: '[data-test="product-image"] img',
+      link: 'a',
+      availability: '[data-test="fulfillment-availability"]',
+    },
+    priceParser: (text) => {
+      // Enhanced price parsing to handle cents, ranges, and multiple price formats
+      const cleanText = text.replace(/[,$]/g, '').replace(/\s+/g, ' ').trim();
+      
+      // Handle separate dollar and cent elements (e.g., "99" + "99" for $99.99)
+      const dollarsAndCents = cleanText.match(/(\d+)\s*(\d{2})(?!\d)/);
+      if (dollarsAndCents && dollarsAndCents[2].length === 2) {
+        return parseFloat(dollarsAndCents[1] + '.' + dollarsAndCents[2]);
+      }
+      
+      // Handle price ranges (take the lower price)
+      const rangeMatch = cleanText.match(/(\d+\.?\d{0,2})\s*-\s*(\d+\.?\d{0,2})/);
+      if (rangeMatch) {
+        return parseFloat(rangeMatch[1]);
+      }
+      
+      // Handle standard price with optional cents
+      const priceMatch = cleanText.match(/(\d+)(?:\.(\d{1,2}))?/);
+      if (priceMatch) {
+        const dollars = parseInt(priceMatch[1]);
+        const cents = priceMatch[2] ? parseInt(priceMatch[2].padEnd(2, '0')) : 0;
+        return dollars + (cents / 100);
+      }
+      
+      return null;
+    },
+  },
 ];
 
 class WebScrapingService {
@@ -272,11 +317,11 @@ class WebScrapingService {
   }
 
   private async getNextProxy(): Promise<string | undefined> {
-    if (FREE_PROXIES.length === 0) return undefined;
+    if (PROXY_LIST.length === 0) return undefined;
     
     // Try to find a working proxy
-    for (let attempts = 0; attempts < FREE_PROXIES.length; attempts++) {
-      const proxy = FREE_PROXIES[this.proxyIndex % FREE_PROXIES.length];
+    for (let attempts = 0; attempts < PROXY_LIST.length; attempts++) {
+      const proxy = PROXY_LIST[this.proxyIndex % PROXY_LIST.length];
       this.proxyIndex++;
       
       if (await this.checkProxyHealth(proxy)) {
@@ -340,7 +385,7 @@ class WebScrapingService {
     
     const browserOptions: Parameters<typeof puppeteer.launch>[0] = {
       headless: true,
-      // Remove hardcoded executablePath to use bundled Chromium
+      // Enhanced anti-detection browser arguments
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -350,7 +395,7 @@ class WebScrapingService {
         '--disable-plugins',
         '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--single-process', // Better for constrained environments
+        '--single-process',
         '--disable-web-security',
         '--disable-features=site-per-process',
         '--aggressive-cache-discard',
@@ -358,7 +403,18 @@ class WebScrapingService {
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
         '--disable-background-networking',
-        '--max_old_space_size=4096'
+        '--max_old_space_size=4096',
+        // Additional anti-detection measures
+        '--disable-features=TranslateUI',
+        '--disable-features=BlinkGenPropertyTrees',
+        '--disable-ipc-flooding-protection',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--disable-extensions-file-access-check',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-permissions-api',
+        '--disable-features=VizDisplayCompositor',
+        '--user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"'
       ],
       defaultViewport: { width: 1920, height: 1080 },
       timeout: 60000,
@@ -394,11 +450,48 @@ class WebScrapingService {
     const page = await this.browser.newPage();
     
     try {
-      // Set random user agent
+      // Set random user agent and additional anti-detection measures
       await page.setUserAgent(this.getRandomUserAgent());
       
-      // Set viewport
-      await page.setViewport({ width: 1920, height: 1080 });
+      // Set viewport with some randomization
+      const viewports = [
+        { width: 1920, height: 1080 },
+        { width: 1366, height: 768 },
+        { width: 1440, height: 900 },
+        { width: 1536, height: 864 }
+      ];
+      const randomViewport = viewports[Math.floor(Math.random() * viewports.length)];
+      await page.setViewport(randomViewport);
+
+      // Block unnecessary resources for better performance and stealth
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const resourceType = req.resourceType();
+        if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+
+      // Remove automation indicators
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined,
+        });
+        
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [1, 2, 3, 4, 5],
+        });
+        
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['en-US', 'en'],
+        });
+        
+        window.chrome = {
+          runtime: {},
+        };
+      });
 
       // Navigate with timeout
       await page.goto(url, { 

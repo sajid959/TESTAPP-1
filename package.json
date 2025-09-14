@@ -39,6 +39,8 @@
     "exa-js": "^1.8.17",
     "inngest": "^3.40.2",
     "inngest-cli": "^1.11.5",
+    "mongodb": "^6.19.0",
+    "mongoose": "^8.18.1",
     "node-html-parser": "^7.0.1",
     "openai": "^5.20.2",
     "pino": "^9.9.4",
