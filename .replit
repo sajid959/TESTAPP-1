@@ -11,8 +11,8 @@ packages = ["jq", "glib", "gtk3", "xvfb-run", "chromium"]
 
 [deployment]
 build = ["bash", "scripts/build.sh"]
-run = ["npm", "run", "dev"]
-deploymentTarget = "autoscale"
+run = ["npx", "mastra", "dev"]
+deploymentTarget = "vm"
 
 [[ports]]
 localPort = 3000
@@ -22,6 +22,10 @@ exposeLocalhost = true
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 8289
+externalPort = 4200
 
 [[ports]]
 localPort = 41499
